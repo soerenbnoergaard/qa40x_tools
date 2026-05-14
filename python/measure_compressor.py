@@ -1,13 +1,31 @@
 import time
 import requests
+import struct
+import base64
 
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 
+SAMPLE_RATE_Hz = 48000
+BUFFER_SIZE = 65536
+
+def floats_to_base64(floats):
+    b = struct.pack("<" + "d" * len(floats), *floats)
+    return base64.b64encode(b).decode("ascii")
+
+def base64_to_floats(b64):
+    b = base64.b64decode(b64)
+    count = len(b) // 8
+    return list(struct.unpack("<" + "d" * count, b))
+
 class QA403:
-    def post(self, s):
-        return requests.post(f"http://localhost:9402/{s}").json()
+    def __init__(self):
+        self.set_buffer_size(BUFFER_SIZE)
+        self.set_sample_rate_Hz(SAMPLE_RATE_Hz)
+
+    def post(self, s, data=None):
+        return requests.post(f"http://localhost:9402/{s}", json=data).json()
 
     def get(self, s):
         return requests.get(f"http://localhost:9402/{s}").json()
@@ -27,6 +45,25 @@ class QA403:
         
     def measure_rms_dBV(self):
         return self.get("RmsDbv/20/20000")["Left"]
+
+    def set_buffer_size(self, buffer_size):
+        return self.put(f"Settings/BufferSize/{buffer_size}")
+
+    def set_sample_rate_Hz(self, sample_rate_Hz):
+        return self.put(f"Settings/SampleRate/{sample_rate_Hz}")
+
+    def acquire_custom_waveform(self, waveform_V):
+        assert(len(waveform_V) == BUFFER_SIZE)
+        s = floats_to_base64(waveform_V)
+        data = {
+            "Left": s,
+            "Right": s,
+        }
+        self.post("Acquisition", data=data)
+
+    def measure_recorded_waveform(self):
+        waveform_base64 = self.get("/Data/Time/Input")["Left"]
+        return base64_to_floats(waveform_base64)
 
 def save_records(records, filename_base):
     filename = filename_base + "_" + time.strftime("%Y-%m-%d_%H%M%S") + ".csv"
@@ -92,11 +129,70 @@ def analyze_compressor_curve(records):
     ax.set_ylabel("Gain [dB]")
     fig.tight_layout()
 
+def measure_compressor_attack(voltage_low_dBV=-40, voltage_high_dBV=-20, frequency_Hz=1000):
+    qa = QA403()
+    qa.set_buffer_size(BUFFER_SIZE)
 
-records = measure_compressor_curve(-60, -20, 1)
-save_records(records, "presonus_eureka")
-#records = load_records("presonus_eureka_2026-05-14_135850.csv")
+    V_low = 10**(voltage_low_dBV/20.0)
+    V_high = 10**(voltage_high_dBV/20.0)
+
+    def generate_waveform():
+        t = np.arange(BUFFER_SIZE) / SAMPLE_RATE_Hz
+        waveform = np.exp(2j * np.pi * frequency_Hz * t)
+
+        waveform[0:BUFFER_SIZE//2] *= V_low
+        waveform[BUFFER_SIZE//2:] *= V_high
+        return waveform
+
+    Vi = generate_waveform()
+
+    qa.acquire_custom_waveform(np.real(Vi))
+    Vo_i = np.array(qa.measure_recorded_waveform())
+    qa.acquire_custom_waveform(np.imag(Vi))
+    Vo_q = np.array(qa.measure_recorded_waveform())
+    Vo = Vo_i + 1j*Vo_q
+
+    # Extract amplitude envelopes
+    Ai = np.abs(Vi)
+    Ao = np.abs(Vo)
+
+    # Measurement points
+    n_low = BUFFER_SIZE//4
+    n_high = 7*BUFFER_SIZE//8
+
+    # Measure small signal gain
+    G = Ao[n_low] / Ai[n_low]
+    print(f"Small signal gain = {20*np.log10(G)} dB")
+    Ao_exp = G * Ai[n_high]
+    print(f"Expected output voltage = {20*np.log10(Ao_exp):.1f} dBV")
+    Ao_settled = Ao[n_high]
+    print(f"Settled output voltage = {20*np.log10(Ao_settled):.1f} dBV")
+    print(f"Gain reduction = {20*np.log10(Ao_exp/Ao_settled):.1f} dB")
+
+    # Measure attack time as: Time from transient until 90% of the gain reduction is effective
+    n0 = BUFFER_SIZE//2
+    GR = Ao_exp - Ao_settled
+    Ao_90 = Ao_settled + (0.1 * GR)
+    n1 = n0
+    for n in reversed(range(n0, n_high)):
+        if Ao[n] > Ao_90:
+            n1 = n
+            break
+    n_attack = n1 - n0
+    t_attack = n_attack / SAMPLE_RATE_Hz
+    print(f"Attack time = {t_attack * 1e3:.3f} ms")
+
+    fig, ax = plt.subplots()
+    ax.plot(Ai)
+    ax.plot(Ao)
+    ax.axhline(Ao_exp, color="k")
+    ax.axhline(Ao_settled, color="k")
+    ax.plot([n1], [Ao_90], "ok")
+
+#records = measure_compressor_curve(-50, 0, 5)
+#save_records(records, "fmr_rnc1773")
+#records = load_records("")
 #analyze_compressor_curve(records)
-#records = load_records("presonus_eureka_2026-05-14_140246.csv")
-#analyze_compressor_curve(records)
+
+measure_compressor_attack(-50, -10)
 plt.show()
