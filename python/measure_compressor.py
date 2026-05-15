@@ -10,7 +10,11 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 SAMPLE_RATE_Hz = 48000
-BUFFER_SIZE = 65536
+
+def is_power_of_two(n):
+    if n <= 0:
+        return False
+    return (n & (n - 1)) == 0
 
 def floats_to_base64(floats):
     b = struct.pack("<" + "d" * len(floats), *floats)
@@ -36,7 +40,7 @@ def generate_filename(filename_base, measurement_name, extension="json.gz"):
 
 class QA403:
     def __init__(self):
-        self.set_buffer_size(BUFFER_SIZE)
+        self.set_buffer_size(65536)
         self.set_sample_rate_Hz(SAMPLE_RATE_Hz)
 
     def post(self, s, data=None):
@@ -68,7 +72,9 @@ class QA403:
         return self.put(f"Settings/SampleRate/{sample_rate_Hz}")
 
     def acquire_custom_waveform(self, waveform_V):
-        assert(len(waveform_V) == BUFFER_SIZE)
+        N = len(waveform_V)
+        assert is_power_of_two(N)
+        self.set_buffer_size(N)
         s = floats_to_base64(waveform_V)
         data = {
             "Left": s,
@@ -140,20 +146,27 @@ def analyze_compressor_curve(label, datasets):
     fig.tight_layout()
     fig.savefig(generate_filename(label, "compressor_curve", "png"))
 
-def measure_compressor_attack(label, voltage_low_dBV=-40, voltage_high_dBV=-20, frequency_Hz=1000):
+def measure_compressor_attack_release(is_release, label, voltage_start_dBV=-40, voltage_stop_dBV=-20, frequency_Hz=1000):
+    measurement_label = "compressor_release" if is_release else "compressor_attack"
     qa = QA403()
-    qa.set_buffer_size(BUFFER_SIZE)
 
-    V_low = 10**(voltage_low_dBV/20.0)
-    V_high = 10**(voltage_high_dBV/20.0)
+    if is_release:
+        buffer_size = 262144
+    else:
+        buffer_size = 65536
+
+    qa.set_buffer_size(buffer_size)
+
+    V_start = 10**(voltage_start_dBV/20.0)
+    V_stop = 10**(voltage_stop_dBV/20.0)
 
     def generate_waveform():
-        t = np.arange(BUFFER_SIZE) / SAMPLE_RATE_Hz
+        t = np.arange(buffer_size) / SAMPLE_RATE_Hz
         waveform = np.exp(2j * np.pi * frequency_Hz * t)
 
-        n0 = 1*BUFFER_SIZE//8
-        waveform[0:n0] *= V_low
-        waveform[n0:] *= V_high
+        n_transient = 1*buffer_size//8
+        waveform[0:n_transient] *= V_start
+        waveform[n_transient:] *= V_stop
         return waveform
 
     Vi = generate_waveform()
@@ -173,10 +186,17 @@ def measure_compressor_attack(label, voltage_low_dBV=-40, voltage_high_dBV=-20, 
         "output_real_V": np.real(Vo).tolist(),
         "output_imag_V": np.imag(Vo).tolist(),
     }
-    dump_data(generate_filename(label, "compressor_attack"), data)
+    dump_data(generate_filename(label, measurement_label), data)
     return data
 
-def analyze_compressor_attack(label, datasets, use_hilbert=False):
+def measure_compressor_attack(*args, **kwargs):
+    return measure_compressor_attack_release(False, *args, **kwargs)
+    
+def measure_compressor_release(*args, **kwargs):
+    return measure_compressor_attack_release(True, *args, **kwargs)
+
+def analyze_compressor_attack_release(is_release, label, datasets, use_hilbert=False):
+    measurement_label = "compressor_release" if is_release else "compressor_attack"
     fig, ax = plt.subplots()
 
     ymin = None
@@ -194,55 +214,79 @@ def analyze_compressor_attack(label, datasets, use_hilbert=False):
             Vi = np.array(data["input_real_V"]) + 1j*np.array(data["input_imag_V"])    
             Vo = np.array(data["output_real_V"]) + 1j*np.array(data["output_imag_V"])    
 
+        buffer_size = len(Vo)
+
         # Extract amplitude envelopes
         Ai = np.abs(Vi)
         Ao = np.abs(Vo)
 
         # Measurement points
-        n_low = 1*BUFFER_SIZE//16
-        n_high = 15*BUFFER_SIZE//16
-        n_transient = 1*BUFFER_SIZE//8
+        n_transient = 1*buffer_size//8
+        n_begin = 1*buffer_size//16
+        n_end = 15*buffer_size//16
+
+        if is_release:
+            n_low = n_end
+            n_high = n_begin
+        else:
+            n_low = n_begin
+            n_high = n_end
 
         # Measure small signal gain
-        G = Ao[n_low] / Ai[n_low]
-        print(f"Small signal gain = {20*np.log10(G)} dB")
-        Ao_exp = G * Ai[n_high]
-        print(f"Expected output voltage = {20*np.log10(Ao_exp):.1f} dBV")
-        Ao_settled = Ao[n_high]
-        print(f"Settled output voltage = {20*np.log10(Ao_settled):.1f} dBV")
-        print(f"Gain reduction = {20*np.log10(Ao_exp/Ao_settled):.1f} dB")
+        G_begin = Ao[n_begin] / Ai[n_begin]
+        print(f"Initial signal gain = {20*np.log10(G_begin)} dB")
+        Ao_end_exp = G_begin * Ai[n_end]
+        print(f"Expected settling voltage = {20*np.log10(Ao_end_exp):.1f} dBV")
+        Ao_end = Ao[n_end]
+        print(f"Measured settling voltage = {20*np.log10(Ao_end):.1f} dBV")
+        print(f"Gain reduction = {20*np.log10(Ao_end_exp/Ao_end):.1f} dB")
 
         # Measure attack time
-        GR = Ao_exp - Ao_settled
+        GR = Ao_end_exp - Ao_end
 
         # Method 1: Time from transient until 90% of the gain reduction is effective
-        # Ao_target = Ao_settled + (0.1 * GR)
+        # Ao_target = Ao_end + (0.1 * GR)
 
         # Method 2: Measure attack time as: Time from transient until 63.2% of the gain reduction is reached (RC time constant method)
-        Ao_target = Ao_exp - 0.632*GR
-        
-        n0 = n_transient
-        n1 = n0
-        for n in reversed(range(n0, n_high)):
-            if Ao[n] > Ao_target:
-                n1 = n
+        Ao_target = Ao_end_exp - 0.632*GR
+        print(f"Search target = {20*np.log10(Ao_target):.1f} dB")
+
+        def compare(value, target):
+            if is_release:
+                return (value < target)
+            else:
+                return (value > target)
+
+        n_target = n_transient
+        for n in reversed(range(n_transient, n_end)):
+            if compare(Ao[n], Ao_target):
+                n_target = n
                 break
-        n_attack = n1 - n0
-        t_attack = n_attack / SAMPLE_RATE_Hz
-        print(f"Attack time = {t_attack * 1e3:.3f} ms")
+        n_dur = n_target - n_transient
+        t_dur = n_dur / SAMPLE_RATE_Hz
+        if is_release:
+            search_label = f"release={t_dur * 1e3:.3f} ms"
+        else:
+            search_label = f"attack={t_dur * 1e3:.3f} ms"
+        print(f"Measured {search_label}")
 
         color = f"C{idx}"
         f = lambda x: 20*np.log10(np.abs(x))
 
-        t = (np.arange(len(Ao)) - n0) / SAMPLE_RATE_Hz * 1000
+        t = (np.arange(len(Ao)) - n_transient) / SAMPLE_RATE_Hz * 1000
         ax.plot(t, f(Ao), color=color, label=f"{label}")
-        ax.plot(t[n0], f(Ao_exp), "s", color=color)
-        ax.plot(t[n_high], f(Ao_settled), "s", color=color)
-        ax.plot([t[n1]], [f(Ao_target)], "o", color=color, label=f"attack={t_attack * 1e3:.3f} ms")
+        ax.plot(t[n_transient], f(Ao_end_exp), "s", color=color)
+        ax.plot(t[n_end], f(Ao_end), "s", color=color)
+        ax.plot([t[n_target]], [f(Ao_target)], "o", color=color, label=search_label)
 
         # Autoscale
-        ymin_now = f(Ao_settled)
-        ymax_now = f(Ao_exp)
+        if is_release:
+            ymin_now = f(Ao_end_exp)
+            ymax_now = f(Ao_end)
+        else:
+            ymin_now = f(Ao_end)
+            ymax_now = f(Ao_end_exp)
+
         ymin = ymin_now if ymin is None or ymin_now < ymin else ymin
         ymax = ymax_now if ymax is None or ymax_now > ymax else ymax
 
@@ -251,23 +295,44 @@ def analyze_compressor_attack(label, datasets, use_hilbert=False):
     ax.set_ylabel("Output amplitude [dBV]")
     ax.set_ylim(ymin - 3, ymax + 3)
     fig.tight_layout()
-    fig.savefig(generate_filename(label, "compressor_attack", "png"))
+    fig.savefig(generate_filename(label, measurement_label, "png"))
+
+
+def analyze_compressor_attack(*args, **kwargs):
+    return analyze_compressor_attack_release(False, *args, **kwargs)
+    
+def analyze_compressor_release(*args, **kwargs):
+    return analyze_compressor_attack_release(True, *args, **kwargs)
 
 
 LABEL = "fmr_rnc1773"
+
+# CURVE
 
 #data_ref = load_data("fmr_rnc1773_compressor_curve_2026-05-15_102808.json")
 #data = measure_compressor_curve(LABEL, -50, 0, 5)
 #analyze_compressor_curve(LABEL, [data_ref, data])
 
 
-#data = measure_compressor_attack(LABEL, -30, -10)
-#analyze_compressor_attack(LABEL, [data])
+# ATTACK
+
+data = measure_compressor_attack(LABEL, -30, -10)
+analyze_compressor_attack(LABEL, [data])
 
 datasets = []
 datasets.append(load_data("fmr_rnc1773_compressor_attack_2026-05-15_112252.json.gz"))
-datasets.append(load_data("fmr_rnc1773_compressor_attack_2026-05-15_112310.json.gz"))
-datasets.append(load_data("fmr_rnc1773_compressor_attack_2026-05-15_112728.json.gz"))
-analyze_compressor_attack(LABEL, datasets)
+#datasets.append(load_data("fmr_rnc1773_compressor_attack_2026-05-15_112310.json.gz"))
+#datasets.append(load_data("fmr_rnc1773_compressor_attack_2026-05-15_112728.json.gz"))
+#analyze_compressor_attack(LABEL, datasets)
+
+# RELEASE
+
+#data = measure_compressor_release(LABEL, -10, -30)
+#analyze_compressor_release(LABEL, [data])
+
+#datasets = []
+#datasets.append(load_data("fmr_rnc1773_compressor_release_2026-05-15_113805.json.gz"))
+#analyze_compressor_release(LABEL, datasets)
+
 
 plt.show()
