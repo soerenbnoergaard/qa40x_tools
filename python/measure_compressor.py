@@ -118,7 +118,7 @@ def measure_compressor_curve(label, amplitude_min_dBV, amplitude_max_dBV, amplit
     dump_data(generate_filename(label, "compressor_curve"), data)
     return data
 
-def analyze_compressor_curve(label, datasets):
+def analyze_compressor_curve(super_label, datasets):
     fig, ax = plt.subplots()
     for idx, data in enumerate(datasets):
         label = data["label"]
@@ -137,14 +137,15 @@ def analyze_compressor_curve(label, datasets):
 
         print(f"Threshold: Vi={Vi_comp:.1f} dBV, Vo={Vi_comp+G_comp:.1f} dBV, G={G_comp:.1f} dB")
 
-        ax.plot(Vi, G, ".-", color=f"C{idx}", label=label)
-        ax.plot(Vi_comp, G_comp, "o", color=f"C{idx}", label=f"threshold={Vi_comp:.1f} dBV")
+        color = f"C{idx}"
+        ax.plot(Vi, G, ".-", color=color, label=label + f"\n(threshold={Vi_comp:.1f} dBV)")
+        ax.plot(Vi_comp, G_comp, "o", color=color)
 
     ax.set_xlabel("Input [dBV]")
     ax.set_ylabel("Gain [dB]")
     ax.legend(loc="lower left", ncols=1)
     fig.tight_layout()
-    fig.savefig(generate_filename(label, "compressor_curve", "png"))
+    fig.savefig(generate_filename(super_label, "compressor_curve", "png"))
 
 def measure_compressor_attack_release(is_release, label, voltage_start_dBV=-40, voltage_stop_dBV=-20, frequency_Hz=1000):
     measurement_label = "compressor_release" if is_release else "compressor_attack"
@@ -195,7 +196,7 @@ def measure_compressor_attack(*args, **kwargs):
 def measure_compressor_release(*args, **kwargs):
     return measure_compressor_attack_release(True, *args, **kwargs)
 
-def analyze_compressor_attack_release(is_release, label, datasets, use_hilbert=False):
+def analyze_compressor_attack_release(is_release, super_label, datasets, use_hilbert=False):
     measurement_label = "compressor_release" if is_release else "compressor_attack"
     fig, ax = plt.subplots()
 
@@ -274,10 +275,10 @@ def analyze_compressor_attack_release(is_release, label, datasets, use_hilbert=F
         f = lambda x: 20*np.log10(np.abs(x))
 
         t = (np.arange(len(Ao)) - n_transient) / SAMPLE_RATE_Hz * 1000
-        ax.plot(t, f(Ao), color=color, label=f"{label}")
+        ax.plot(t, f(Ao), color=color, label=f"{label}\n{search_label}")
         ax.plot(t[n_transient], f(Ao_end_exp), "s", color=color)
         ax.plot(t[n_end], f(Ao_end), "s", color=color)
-        ax.plot([t[n_target]], [f(Ao_target)], "o", color=color, label=search_label)
+        ax.plot([t[n_target]], [f(Ao_target)], "o", color=color)
 
         # Autoscale
         if is_release:
@@ -290,12 +291,12 @@ def analyze_compressor_attack_release(is_release, label, datasets, use_hilbert=F
         ymin = ymin_now if ymin is None or ymin_now < ymin else ymin
         ymax = ymax_now if ymax is None or ymax_now > ymax else ymax
 
-    ax.legend(loc="upper right", ncols=1)
+    ax.legend(loc="lower right" if is_release else "upper right", ncols=1)
     ax.set_xlabel("Time [ms]")
     ax.set_ylabel("Output amplitude [dBV]")
     ax.set_ylim(ymin - 3, ymax + 3)
     fig.tight_layout()
-    fig.savefig(generate_filename(label, measurement_label, "png"))
+    fig.savefig(generate_filename(super_label, measurement_label, "png"))
 
 
 def analyze_compressor_attack(*args, **kwargs):
@@ -305,34 +306,57 @@ def analyze_compressor_release(*args, **kwargs):
     return analyze_compressor_attack_release(True, *args, **kwargs)
 
 
-LABEL = "fmr_rnc1773"
+LABEL = "RNC1773_T-20_R25_A0002_R5000_G0_SNon"
+THRESHOLD_dBV = -20
 
 # CURVE
+# Recommended settings: attack=fast, release=fast
 
-#data_ref = load_data("fmr_rnc1773_compressor_curve_2026-05-15_102808.json")
-#data = measure_compressor_curve(LABEL, -50, 0, 5)
-#analyze_compressor_curve(LABEL, [data_ref, data])
+#data = measure_compressor_curve(LABEL, THRESHOLD_dBV - 30, THRESHOLD_dBV + 20, 1)
+#analyze_compressor_curve(LABEL, [data])
+
+#datasets = []
+#datasets.append(load_data("RNC1773_T-20_R01_A01_R005_G0_SNoff_compressor_curve_2026-05-15_122929.json.gz"))
+#datasets.append(load_data("RNC1773_T-20_R02_A01_R005_G0_SNoff_compressor_curve_2026-05-15_123204.json.gz"))
+#datasets.append(load_data("RNC1773_T-20_R06_A01_R005_G0_SNoff_compressor_curve_2026-05-15_123527.json.gz"))
+#datasets.append(load_data("RNC1773_T-20_R10_A01_R005_G0_SNoff_compressor_curve_2026-05-15_123716.json.gz"))
+#datasets.append(load_data("RNC1773_T-20_R25_A01_R005_G0_SNoff_compressor_curve_2026-05-15_124454.json.gz"))
+#analyze_compressor_curve("RNC1773", datasets)
 
 
 # ATTACK
+# Recommended settings: ratio=high, release=fast, Vstart=Vthres-20, Vstop=Vthres+20
 
-data = measure_compressor_attack(LABEL, -30, -10)
-analyze_compressor_attack(LABEL, [data])
+#data = measure_compressor_attack(LABEL, THRESHOLD_dBV - 20, THRESHOLD_dBV + 20)
+#analyze_compressor_attack(LABEL, [data])
 
-datasets = []
-datasets.append(load_data("fmr_rnc1773_compressor_attack_2026-05-15_112252.json.gz"))
-#datasets.append(load_data("fmr_rnc1773_compressor_attack_2026-05-15_112310.json.gz"))
-#datasets.append(load_data("fmr_rnc1773_compressor_attack_2026-05-15_112728.json.gz"))
-#analyze_compressor_attack(LABEL, datasets)
+#datasets = [
+    #load_data("RNC1773_T-20_R25_A0002_R0050_G0_SNon_compressor_attack_2026-05-15_133812.json.gz"),
+    #load_data("RNC1773_T-20_R25_A0006_R0050_G0_SNon_compressor_attack_2026-05-15_133836.json.gz"),
+    #load_data("RNC1773_T-20_R25_A0020_R0050_G0_SNon_compressor_attack_2026-05-15_133904.json.gz"),
+    #load_data("RNC1773_T-20_R25_A0060_R0050_G0_SNon_compressor_attack_2026-05-15_133946.json.gz"),
+    #load_data("RNC1773_T-20_R25_A0200_R0050_G0_SNon_compressor_attack_2026-05-15_134008.json.gz"),
+    #load_data("RNC1773_T-20_R25_A0600_R0050_G0_SNon_compressor_attack_2026-05-15_134027.json.gz"),
+    #load_data("RNC1773_T-20_R25_A2000_R0050_G0_SNon_compressor_attack_2026-05-15_134045.json.gz"),
+#]
+#analyze_compressor_attack("RNC1773", datasets)
+
 
 # RELEASE
+# Recommended settings: ratio=high, attack=fast, Vstart=Vthres+20, Vstop=Vthres-20
 
-#data = measure_compressor_release(LABEL, -10, -30)
+#data = measure_compressor_release(LABEL, THRESHOLD_dBV + 20, THRESHOLD_dBV - 20)
 #analyze_compressor_release(LABEL, [data])
 
-#datasets = []
-#datasets.append(load_data("fmr_rnc1773_compressor_release_2026-05-15_113805.json.gz"))
-#analyze_compressor_release(LABEL, datasets)
-
+#datasets = [
+    #load_data("RNC1773_T-20_R25_A0002_R0050_G0_SNon_compressor_release_2026-05-15_134247.json.gz"),
+    #load_data("RNC1773_T-20_R25_A0002_R0100_G0_SNon_compressor_release_2026-05-15_134323.json.gz"),
+    #load_data("RNC1773_T-20_R25_A0002_R0300_G0_SNon_compressor_release_2026-05-15_134356.json.gz"),
+    #load_data("RNC1773_T-20_R25_A0002_R0500_G0_SNon_compressor_release_2026-05-15_134432.json.gz"),
+    #load_data("RNC1773_T-20_R25_A0002_R1000_G0_SNon_compressor_release_2026-05-15_134503.json.gz"),
+    #load_data("RNC1773_T-20_R25_A0002_R3000_G0_SNon_compressor_release_2026-05-15_134538.json.gz"),
+    #load_data("RNC1773_T-20_R25_A0002_R5000_G0_SNon_compressor_release_2026-05-15_134614.json.gz"),
+#]
+#analyze_compressor_release("RNC1773", datasets)
 
 plt.show()
