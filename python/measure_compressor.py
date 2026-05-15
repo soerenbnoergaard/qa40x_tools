@@ -306,22 +306,24 @@ def analyze_compressor_release(*args, **kwargs):
     return analyze_compressor_attack_release(True, *args, **kwargs)
 
 
-LABEL = "RNC1773_T-20_R25_A0002_R5000_G0_SNon"
-THRESHOLD_dBV = -20
+LABEL = "eureka_line_T-32_A00_RA00_RE10_G0_SOFToff"
+THRESHOLD_dBV = -40
 
 # CURVE
 # Recommended settings: attack=fast, release=fast
 
-#data = measure_compressor_curve(LABEL, THRESHOLD_dBV - 30, THRESHOLD_dBV + 20, 1)
+#data = measure_compressor_curve(LABEL, THRESHOLD_dBV - 10, THRESHOLD_dBV + 10, 1)
 #analyze_compressor_curve(LABEL, [data])
 
-#datasets = []
-#datasets.append(load_data("RNC1773_T-20_R01_A01_R005_G0_SNoff_compressor_curve_2026-05-15_122929.json.gz"))
-#datasets.append(load_data("RNC1773_T-20_R02_A01_R005_G0_SNoff_compressor_curve_2026-05-15_123204.json.gz"))
-#datasets.append(load_data("RNC1773_T-20_R06_A01_R005_G0_SNoff_compressor_curve_2026-05-15_123527.json.gz"))
-#datasets.append(load_data("RNC1773_T-20_R10_A01_R005_G0_SNoff_compressor_curve_2026-05-15_123716.json.gz"))
-#datasets.append(load_data("RNC1773_T-20_R25_A01_R005_G0_SNoff_compressor_curve_2026-05-15_124454.json.gz"))
-#analyze_compressor_curve("RNC1773", datasets)
+#datasets = [
+    #load_data("eureka_line_T-32_A00_RA02_RE00_G0_SOFToff_compressor_curve_2026-05-15_142510.json.gz"),
+    #load_data("eureka_line_T-32_A00_RA02_RE00_G0_SOFTon_compressor_curve_2026-05-15_142557.json.gz"),
+    #load_data("eureka_line_T-32_A00_RA05_RE00_G0_SOFToff_compressor_curve_2026-05-15_142421.json.gz"),
+    #load_data("eureka_line_T-32_A00_RA05_RE00_G0_SOFTon_compressor_curve_2026-05-15_142650.json.gz"),
+    #load_data("eureka_line_T-32_A00_RA10_RE00_G0_SOFToff_compressor_curve_2026-05-15_142330.json.gz"),
+    #load_data("eureka_line_T-32_A00_RA10_RE00_G0_SOFTon_compressor_curve_2026-05-15_142736.json.gz"),
+#]
+#analyze_compressor_curve("Eureka", datasets)
 
 
 # ATTACK
@@ -331,15 +333,13 @@ THRESHOLD_dBV = -20
 #analyze_compressor_attack(LABEL, [data])
 
 #datasets = [
-    #load_data("RNC1773_T-20_R25_A0002_R0050_G0_SNon_compressor_attack_2026-05-15_133812.json.gz"),
-    #load_data("RNC1773_T-20_R25_A0006_R0050_G0_SNon_compressor_attack_2026-05-15_133836.json.gz"),
-    #load_data("RNC1773_T-20_R25_A0020_R0050_G0_SNon_compressor_attack_2026-05-15_133904.json.gz"),
-    #load_data("RNC1773_T-20_R25_A0060_R0050_G0_SNon_compressor_attack_2026-05-15_133946.json.gz"),
-    #load_data("RNC1773_T-20_R25_A0200_R0050_G0_SNon_compressor_attack_2026-05-15_134008.json.gz"),
-    #load_data("RNC1773_T-20_R25_A0600_R0050_G0_SNon_compressor_attack_2026-05-15_134027.json.gz"),
-    #load_data("RNC1773_T-20_R25_A2000_R0050_G0_SNon_compressor_attack_2026-05-15_134045.json.gz"),
+    #load_data("eureka_line_T-32_A00_RA10_RE00_G0_SOFToff_compressor_attack_2026-05-15_142931.json.gz"),
+    #load_data("eureka_line_T-32_A02_RA00_RE00_G0_SOFToff_compressor_attack_2026-05-15_143337.json.gz"),
+    #load_data("eureka_line_T-32_A05_RA10_RE00_G0_SOFToff_compressor_attack_2026-05-15_143010.json.gz"),
+    #load_data("eureka_line_T-32_A08_RA00_RE00_G0_SOFToff_compressor_attack_2026-05-15_143403.json.gz"),
+    #load_data("eureka_line_T-32_A10_RA10_RE00_G0_SOFToff_compressor_attack_2026-05-15_143028.json.gz"),
 #]
-#analyze_compressor_attack("RNC1773", datasets)
+#analyze_compressor_attack("Eureka", datasets)
 
 
 # RELEASE
@@ -349,14 +349,12 @@ THRESHOLD_dBV = -20
 #analyze_compressor_release(LABEL, [data])
 
 #datasets = [
-    #load_data("RNC1773_T-20_R25_A0002_R0050_G0_SNon_compressor_release_2026-05-15_134247.json.gz"),
-    #load_data("RNC1773_T-20_R25_A0002_R0100_G0_SNon_compressor_release_2026-05-15_134323.json.gz"),
-    #load_data("RNC1773_T-20_R25_A0002_R0300_G0_SNon_compressor_release_2026-05-15_134356.json.gz"),
-    #load_data("RNC1773_T-20_R25_A0002_R0500_G0_SNon_compressor_release_2026-05-15_134432.json.gz"),
-    #load_data("RNC1773_T-20_R25_A0002_R1000_G0_SNon_compressor_release_2026-05-15_134503.json.gz"),
-    #load_data("RNC1773_T-20_R25_A0002_R3000_G0_SNon_compressor_release_2026-05-15_134538.json.gz"),
-    #load_data("RNC1773_T-20_R25_A0002_R5000_G0_SNon_compressor_release_2026-05-15_134614.json.gz"),
+    #load_data("eureka_line_T-32_A00_RA00_RE00_G0_SOFToff_compressor_release_2026-05-15_143527.json.gz"),
+    #load_data("eureka_line_T-32_A00_RA00_RE02_G0_SOFToff_compressor_release_2026-05-15_143602.json.gz"),
+    #load_data("eureka_line_T-32_A00_RA00_RE05_G0_SOFToff_compressor_release_2026-05-15_143637.json.gz"),
+    #load_data("eureka_line_T-32_A00_RA00_RE08_G0_SOFToff_compressor_release_2026-05-15_143719.json.gz"),
+    #load_data("eureka_line_T-32_A00_RA00_RE10_G0_SOFToff_compressor_release_2026-05-15_143749.json.gz"),
 #]
-#analyze_compressor_release("RNC1773", datasets)
+#analyze_compressor_release("Eureka", datasets)
 
 plt.show()
