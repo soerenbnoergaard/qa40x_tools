@@ -1,7 +1,9 @@
+import gzip
 import time
 import requests
 import struct
 import base64
+import json
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -18,6 +20,19 @@ def base64_to_floats(b64):
     b = base64.b64decode(b64)
     count = len(b) // 8
     return list(struct.unpack("<" + "d" * count, b))
+
+def dump_data(filename, data):
+    json_bytes = json.dumps(data).encode("utf-8")
+    with gzip.open(filename, "w") as fh:
+        fh.write(json_bytes)
+
+def load_data(filename):
+    with gzip.open(filename, "r") as fh:
+        json_str = fh.read().decode("utf-8")
+    return json.loads(json_str)
+
+def generate_filename(filename_base, measurement_name, extension="json.gz"):
+    return filename_base + "_" + measurement_name + "_" + time.strftime("%Y-%m-%d_%H%M%S") + "." + extension
 
 class QA403:
     def __init__(self):
@@ -65,71 +80,67 @@ class QA403:
         waveform_base64 = self.get("/Data/Time/Input")["Left"]
         return base64_to_floats(waveform_base64)
 
-def save_records(records, filename_base):
-    filename = filename_base + "_" + time.strftime("%Y-%m-%d_%H%M%S") + ".csv"
-    keys = records[0].keys()
-    header = ",".join(keys)
-    with open(filename, "w") as fh:
-        fh.write(header + "\n")
-        for record in records:
-            line = ",".join([str(record[k]) for k in keys])
-            fh.write(line + "\n")
-    print(f"Write to {filename} complete!")
-
-def load_records(filename):
-    df = pd.read_csv(filename)
-    return df.to_records(index=False)
-
 def lerp(x, x0, y0, x1, y1):
     return (y0 * (x1 - x) + y1 * (x - x0)) / (x1 - x0)
 
-def measure_compressor_curve(amplitude_min_dBV, amplitude_max_dBV, amplitude_step_dB, frequency_Hz=1000):
+def measure_compressor_curve(label, amplitude_min_dBV, amplitude_max_dBV, amplitude_step_dB, frequency_Hz=1000):
     assert (
         (amplitude_step_dB > 0 and amplitude_min_dBV < amplitude_max_dBV) or
         (amplitude_step_dB < 0 and amplitude_min_dBV > amplitude_max_dBV)
     )
     qa = QA403()
-    records = []
+    inputs_dBV = []
+    outputs_dBV = []
 
     input_dBV = amplitude_min_dBV
     while input_dBV <= amplitude_max_dBV:
         qa.setup_gen1(True, frequency_Hz, input_dBV)
         qa.acquire()
-        output_dBV = qa.measure_rms_dBV()
-        record = {
-            "frequency_Hz": float(frequency_Hz),
-            "input_dBV": float(input_dBV),
-            "output_dBV": float(output_dBV),
-        }
-        print(record)
-        records.append(record)
+        output_dBV = float(qa.measure_rms_dBV())
+        inputs_dBV.append(input_dBV)
+        outputs_dBV.append(output_dBV)
+        print(f"input={input_dBV:.1f} dBV, output={output_dBV:.1f} dBV, gain={output_dBV - input_dBV:.1f} dB")
         input_dBV += amplitude_step_dB
 
-    return records
+    # Save to JSON file
+    data = {
+        "label": label,
+        "frequency_Hz": frequency_Hz,
+        "input_dBV": [_x for _x in inputs_dBV],
+        "output_dBV": [_x for _x in outputs_dBV],
+    }
+    dump_data(generate_filename(label, "compressor_curve"), data)
+    return data
 
-def analyze_compressor_curve(records):
-    df = pd.DataFrame.from_records(records)
-    Vi = df["input_dBV"]
-    Vo = df["output_dBV"]
-    G = Vo - Vi
-
-    # Find threshold as the 1 dB compression point
-    G_comp = G[0] - 1
-    Vi_comp = np.nan
-    for n in range(1, len(G)):
-        if G[n] < G_comp:
-            Vi_comp = lerp(G_comp, G[n-1], Vi[n-1], G[n], Vi[n])
-
-    print(f"Threshold: Vi={Vi_comp:.1f} dBV, Vo={Vi_comp+G_comp:.1f} dBV, G={G_comp:.1f} dB")
-
+def analyze_compressor_curve(label, datasets):
     fig, ax = plt.subplots()
-    ax.plot(Vi, G, ".-")
-    ax.plot(Vi_comp, G_comp, "o")
+    for idx, data in enumerate(datasets):
+        label = data["label"]
+        Vi = np.array(data["input_dBV"])
+        Vi = np.array(data["input_dBV"])
+        Vo = np.array(data["output_dBV"])
+        G = Vo - Vi
+
+        # Find threshold as the 1 dB compression point
+        G_comp = G[0] - 1
+        Vi_comp = np.nan
+        for n in range(1, len(G)):
+            if G[n] < G_comp:
+                Vi_comp = lerp(G_comp, G[n-1], Vi[n-1], G[n], Vi[n])
+                break
+
+        print(f"Threshold: Vi={Vi_comp:.1f} dBV, Vo={Vi_comp+G_comp:.1f} dBV, G={G_comp:.1f} dB")
+
+        ax.plot(Vi, G, ".-", color=f"C{idx}", label=label)
+        ax.plot(Vi_comp, G_comp, "o", color=f"C{idx}", label=f"threshold={Vi_comp:.1f} dBV")
+
     ax.set_xlabel("Input [dBV]")
     ax.set_ylabel("Gain [dB]")
+    ax.legend(loc="lower left", ncol=2)
     fig.tight_layout()
+    fig.savefig(generate_filename(label, "compressor_curve", "png"))
 
-def measure_compressor_attack(voltage_low_dBV=-40, voltage_high_dBV=-20, frequency_Hz=1000):
+def measure_compressor_attack(label, voltage_low_dBV=-40, voltage_high_dBV=-20, frequency_Hz=1000):
     qa = QA403()
     qa.set_buffer_size(BUFFER_SIZE)
 
@@ -148,9 +159,28 @@ def measure_compressor_attack(voltage_low_dBV=-40, voltage_high_dBV=-20, frequen
 
     qa.acquire_custom_waveform(np.real(Vi))
     Vo_i = np.array(qa.measure_recorded_waveform())
+    time.sleep(3)
     qa.acquire_custom_waveform(np.imag(Vi))
     Vo_q = np.array(qa.measure_recorded_waveform())
     Vo = Vo_i + 1j*Vo_q
+
+    data = {
+        "label": label,
+        "frequency_Hz": frequency_Hz,
+        "input_real_V": np.real(Vi).tolist(),
+        "input_imag_V": np.imag(Vi).tolist(),
+        "output_real_V": np.real(Vo).tolist(),
+        "output_imag_V": np.imag(Vo).tolist(),
+    }
+    dump_data(generate_filename(label, "compressor_attack"), data)
+    return data
+
+def analyze_compressor_attack(label, datasets):
+    data = datasets[0]
+    label = data["label"]
+    f = data["frequency_Hz"]
+    Vi = np.array(data["input_real_V"]) + 1j*np.array(data["input_imag_V"])    
+    Vo = np.array(data["output_real_V"]) + 1j*np.array(data["output_imag_V"])    
 
     # Extract amplitude envelopes
     Ai = np.abs(Vi)
@@ -188,11 +218,17 @@ def measure_compressor_attack(voltage_low_dBV=-40, voltage_high_dBV=-20, frequen
     ax.axhline(Ao_exp, color="k")
     ax.axhline(Ao_settled, color="k")
     ax.plot([n1], [Ao_90], "ok")
+    fig.tight_layout()
+    fig.savefig(generate_filename(label, "compressor_attack", "png"))
 
-#records = measure_compressor_curve(-50, 0, 5)
-#save_records(records, "fmr_rnc1773")
-#records = load_records("")
-#analyze_compressor_curve(records)
 
-measure_compressor_attack(-50, -10)
+LABEL = "fmr_rnc1773"
+
+#data_ref = load_data("fmr_rnc1773_compressor_curve_2026-05-15_102808.json")
+#data = measure_compressor_curve(LABEL, -50, 0, 5)
+#analyze_compressor_curve(LABEL, [data_ref, data])
+
+#data = measure_compressor_attack(LABEL, -50, -10)
+data = load_data("fmr_rnc1773_compressor_attack_2026-05-15_104232.json.gz")
+analyze_compressor_attack(LABEL, [data])
 plt.show()
