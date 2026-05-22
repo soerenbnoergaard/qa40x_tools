@@ -1,13 +1,17 @@
 import gzip
+import glob
 import time
 import requests
 import struct
 import base64
 import json
+from types import SimpleNamespace
 
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
+
+plt.style.use("bmh")
 
 SAMPLE_RATE_Hz = 48000
 
@@ -51,7 +55,7 @@ class QA403:
 
     def put(self, s):
         return requests.put(f"http://localhost:9402/{s}").json()
-    
+
     def acquire(self):
         return self.post("Acquisition")
 
@@ -61,7 +65,7 @@ class QA403:
             frequency_Hz,
             amplitude_dBV,
         ))
-        
+
     def measure_rms_dBV(self):
         return self.get("RmsDbv/20/20000")["Left"]
 
@@ -118,7 +122,48 @@ def measure_compressor_curve(label, amplitude_min_dBV, amplitude_max_dBV, amplit
     dump_data(generate_filename(label, "compressor_curve"), data)
     return data
 
-def analyze_compressor_curve(super_label, datasets):
+def rsquared(x, y):
+    corr_matrix = np.corrcoef(x, y)
+    corr = corr_matrix[0, 1]
+    return corr ** 2
+
+def calculate_threshold(Vi, G):
+    # Find threshold as the 1 dB compression point
+    G_comp = G[0] - 1
+    Vi_comp = np.nan
+    for n in range(1, len(G)):
+        if G[n] < G_comp:
+            Vi_comp = lerp(G_comp, G[n-1], Vi[n-1], G[n], Vi[n])
+            return SimpleNamespace(
+                Vi_comp=Vi_comp,
+                G_comp=G_comp,
+                n_pre=n-1,
+                n_post=n,
+            )
+    return SimpleNamespace(
+        Vi_comp=Vi_comp,
+        G_comp=G_comp,
+        n_pre=len(G)-3,
+        n_post=len(G)-2,
+    )
+
+def calculate_ratio(Vi, G):
+    # Input data is the curve above the threshold
+
+    m, b = np.polyfit(Vi, G, 1)
+    r2 = rsquared(Vi, G)
+
+    # The ratio is reciprocal of the slope of the Vo vs Vi curve
+    ratio = 1 / (m + 1)
+
+    return SimpleNamespace(
+        ratio=ratio,
+        slope=m,
+        yintersect=b,
+        r2=r2,
+    )
+
+def analyze_compressor_curve(super_label, datasets, gain_curve=False):
     fig, ax = plt.subplots()
     for idx, data in enumerate(datasets):
         label = data["label"]
@@ -127,23 +172,41 @@ def analyze_compressor_curve(super_label, datasets):
         Vo = np.array(data["output_dBV"])
         G = Vo - Vi
 
-        # Find threshold as the 1 dB compression point
-        G_comp = G[0] - 1
-        Vi_comp = np.nan
-        for n in range(1, len(G)):
-            if G[n] < G_comp:
-                Vi_comp = lerp(G_comp, G[n-1], Vi[n-1], G[n], Vi[n])
-                break
+        threshold_data = calculate_threshold(Vi, G)
+        ratio_data = calculate_ratio(Vi[threshold_data.n_post:], G[threshold_data.n_post:])
+        gain_fit = lambda _Vi: ratio_data.slope * _Vi + ratio_data.yintersect
+        io_fit = lambda _Vi: (ratio_data.slope + 1) * _Vi + ratio_data.yintersect
 
-        print(f"Threshold: Vi={Vi_comp:.1f} dBV, Vo={Vi_comp+G_comp:.1f} dBV, G={G_comp:.1f} dB")
+        print("{}: Vi_comp={:.1f} dBV, Vo_comp={:.1f} dBV, G_comp={:.1f} dB, ratio={:.1f}:1, slope={:.3f}, R-squared={:.3f}".format(
+            label,
+            threshold_data.Vi_comp,
+            threshold_data.Vi_comp + threshold_data.G_comp,
+            threshold_data.G_comp,
+            ratio_data.ratio,
+            ratio_data.slope,
+            ratio_data.r2,
+        ))
 
         color = f"C{idx}"
-        ax.plot(Vi, G, ".-", color=color, label=label + f"\n(threshold={Vi_comp:.1f} dBV)")
-        ax.plot(Vi_comp, G_comp, "o", color=color)
+        legend_label = "{}\nthreshold={:.1f} dBV, ratio={:.1f}:1".format(
+            label,
+            threshold_data.Vi_comp,
+            ratio_data.ratio,
+        )
+
+        if gain_curve:
+            ax.plot(Vi, G, ".-", color=color, label=legend_label)
+            ax.plot(threshold_data.Vi_comp, threshold_data.G_comp, "o", color=color)
+            # ax.plot([Vi[0], Vi[-1]], [gain_fit(Vi[0]), gain_fit(Vi[-1])], color=color, linestyle="--")
+
+        else:
+            ax.plot(Vi, Vo, ".-", color=color, label=legend_label)
+            ax.plot(threshold_data.Vi_comp, threshold_data.G_comp + threshold_data.Vi_comp, "o", color=color)
+            # ax.plot([Vi[0], Vi[-1]], [io_fit(Vi[0]), io_fit(Vi[-1])], color=color, linestyle="--")
 
     ax.set_xlabel("Input [dBV]")
-    ax.set_ylabel("Gain [dB]")
-    ax.legend(loc="lower left", ncols=1)
+    ax.set_ylabel("Gain [dB]" if gain_curve else "Output [dBV]")
+    ax.legend(loc="lower left" if gain_curve else "upper left", ncols=1, fontsize=6)
     fig.tight_layout()
     fig.savefig(generate_filename(super_label, "compressor_curve", "png"))
 
@@ -192,7 +255,7 @@ def measure_compressor_attack_release(is_release, label, voltage_start_dBV=-40, 
 
 def measure_compressor_attack(*args, **kwargs):
     return measure_compressor_attack_release(False, *args, **kwargs)
-    
+
 def measure_compressor_release(*args, **kwargs):
     return measure_compressor_attack_release(True, *args, **kwargs)
 
@@ -212,8 +275,8 @@ def analyze_compressor_attack_release(is_release, super_label, datasets, use_hil
             Vi = hilbert(np.array(data["input_real_V"]) )
             Vo = hilbert(np.array(data["output_real_V"]))
         else:
-            Vi = np.array(data["input_real_V"]) + 1j*np.array(data["input_imag_V"])    
-            Vo = np.array(data["output_real_V"]) + 1j*np.array(data["output_imag_V"])    
+            Vi = np.array(data["input_real_V"]) + 1j*np.array(data["input_imag_V"])
+            Vo = np.array(data["output_real_V"]) + 1j*np.array(data["output_imag_V"])
 
         buffer_size = len(Vo)
 
@@ -291,7 +354,7 @@ def analyze_compressor_attack_release(is_release, super_label, datasets, use_hil
         ymin = ymin_now if ymin is None or ymin_now < ymin else ymin
         ymax = ymax_now if ymax is None or ymax_now > ymax else ymax
 
-    ax.legend(loc="lower right" if is_release else "upper right", ncols=1)
+    ax.legend(loc="lower right" if is_release else "upper right", ncols=1, fontsize=6)
     ax.set_xlabel("Time [ms]")
     ax.set_ylabel("Output amplitude [dBV]")
     ax.set_ylim(ymin - 3, ymax + 3)
@@ -301,7 +364,7 @@ def analyze_compressor_attack_release(is_release, super_label, datasets, use_hil
 
 def analyze_compressor_attack(*args, **kwargs):
     return analyze_compressor_attack_release(False, *args, **kwargs)
-    
+
 def analyze_compressor_release(*args, **kwargs):
     return analyze_compressor_attack_release(True, *args, **kwargs)
 
@@ -312,49 +375,30 @@ THRESHOLD_dBV = -40
 # CURVE
 # Recommended settings: attack=fast, release=fast
 
-#data = measure_compressor_curve(LABEL, THRESHOLD_dBV - 10, THRESHOLD_dBV + 10, 1)
-#analyze_compressor_curve(LABEL, [data])
+# data = measure_compressor_curve(LABEL, THRESHOLD_dBV - 10, THRESHOLD_dBV + 10, 1)
+# analyze_compressor_curve(LABEL, [data])
 
-#datasets = [
-    #load_data("eureka_line_T-32_A00_RA02_RE00_G0_SOFToff_compressor_curve_2026-05-15_142510.json.gz"),
-    #load_data("eureka_line_T-32_A00_RA02_RE00_G0_SOFTon_compressor_curve_2026-05-15_142557.json.gz"),
-    #load_data("eureka_line_T-32_A00_RA05_RE00_G0_SOFToff_compressor_curve_2026-05-15_142421.json.gz"),
-    #load_data("eureka_line_T-32_A00_RA05_RE00_G0_SOFTon_compressor_curve_2026-05-15_142650.json.gz"),
-    #load_data("eureka_line_T-32_A00_RA10_RE00_G0_SOFToff_compressor_curve_2026-05-15_142330.json.gz"),
-    #load_data("eureka_line_T-32_A00_RA10_RE00_G0_SOFTon_compressor_curve_2026-05-15_142736.json.gz"),
-#]
-#analyze_compressor_curve("Eureka", datasets)
+# datasets = [load_data(_f) for _f in sorted(glob.glob("*compressor_curve_*.json.gz"))]
+# analyze_compressor_curve("", datasets)
 
 
 # ATTACK
 # Recommended settings: ratio=high, release=fast, Vstart=Vthres-20, Vstop=Vthres+20
 
-#data = measure_compressor_attack(LABEL, THRESHOLD_dBV - 20, THRESHOLD_dBV + 20)
-#analyze_compressor_attack(LABEL, [data])
+# data = measure_compressor_attack(LABEL, THRESHOLD_dBV - 20, THRESHOLD_dBV + 20)
+# analyze_compressor_attack(LABEL, [data])
 
-#datasets = [
-    #load_data("eureka_line_T-32_A00_RA10_RE00_G0_SOFToff_compressor_attack_2026-05-15_142931.json.gz"),
-    #load_data("eureka_line_T-32_A02_RA00_RE00_G0_SOFToff_compressor_attack_2026-05-15_143337.json.gz"),
-    #load_data("eureka_line_T-32_A05_RA10_RE00_G0_SOFToff_compressor_attack_2026-05-15_143010.json.gz"),
-    #load_data("eureka_line_T-32_A08_RA00_RE00_G0_SOFToff_compressor_attack_2026-05-15_143403.json.gz"),
-    #load_data("eureka_line_T-32_A10_RA10_RE00_G0_SOFToff_compressor_attack_2026-05-15_143028.json.gz"),
-#]
-#analyze_compressor_attack("Eureka", datasets)
+# datasets = [load_data(_f) for _f in sorted(glob.glob("*compressor_attack_*.json.gz"))]
+# analyze_compressor_attack("", datasets)
 
 
 # RELEASE
 # Recommended settings: ratio=high, attack=fast, Vstart=Vthres+20, Vstop=Vthres-20
 
-#data = measure_compressor_release(LABEL, THRESHOLD_dBV + 20, THRESHOLD_dBV - 20)
-#analyze_compressor_release(LABEL, [data])
+# data = measure_compressor_release(LABEL, THRESHOLD_dBV + 20, THRESHOLD_dBV - 20)
+# analyze_compressor_release(LABEL, [data])
 
-#datasets = [
-    #load_data("eureka_line_T-32_A00_RA00_RE00_G0_SOFToff_compressor_release_2026-05-15_143527.json.gz"),
-    #load_data("eureka_line_T-32_A00_RA00_RE02_G0_SOFToff_compressor_release_2026-05-15_143602.json.gz"),
-    #load_data("eureka_line_T-32_A00_RA00_RE05_G0_SOFToff_compressor_release_2026-05-15_143637.json.gz"),
-    #load_data("eureka_line_T-32_A00_RA00_RE08_G0_SOFToff_compressor_release_2026-05-15_143719.json.gz"),
-    #load_data("eureka_line_T-32_A00_RA00_RE10_G0_SOFToff_compressor_release_2026-05-15_143749.json.gz"),
-#]
-#analyze_compressor_release("Eureka", datasets)
+# datasets = [load_data(_f) for _f in sorted(glob.glob("*compressor_release_*.json.gz"))]
+# analyze_compressor_release("", datasets)
 
 plt.show()
