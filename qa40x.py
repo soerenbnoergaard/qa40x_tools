@@ -4,6 +4,7 @@ import json
 import requests
 import struct
 import time
+import numpy as np
 
 SAMPLE_RATE_Hz = 48000
 
@@ -79,5 +80,49 @@ class Qa40x:
         self.post("Acquisition", data=data)
 
     def measure_recorded_waveform(self):
-        waveform_base64 = self.get("/Data/Time/Input")["Left"]
-        return base64_to_floats(waveform_base64)
+        data = self.get("Data/Time/Input")
+        left = base64_to_floats(data["Left"])
+        right = base64_to_floats(data["Right"])
+        N = len(left)
+        t = (np.arange(N) / SAMPLE_RATE_Hz).tolist()
+        return {
+            "Time": t,
+            "Left": left,
+            "Right": right,
+        }
+
+    def measure_played_waveform(self):
+        data = self.get("Data/Time/Output")
+        left = base64_to_floats(data["Left"])
+        right = base64_to_floats(data["Right"])
+        N = len(left)
+        t = (np.arange(N) / SAMPLE_RATE_Hz).tolist()
+        return {
+            "Time": t,
+            "Left": left,
+            "Right": right,
+        }
+
+    def measure_recorded_spectrum(self):
+        data = self.get("Data/Frequency/Input")
+        left = base64_to_floats(data["Left"])
+        right = base64_to_floats(data["Right"])
+        N = len(left)
+        f = (np.arange(N)/N * (SAMPLE_RATE_Hz / 2.0)).tolist()
+        return {
+            "Frequency": f,
+            "Left": left,
+            "Right": right,
+        }
+
+    def measure_played_spectrum(self):
+        data = self.get("Data/Frequency/Output")
+        left = base64_to_floats(data["Left"])
+        right = base64_to_floats(data["Right"])
+        N = len(left)
+        f = (np.arange(N)/N * (SAMPLE_RATE_Hz / 2.0)).tolist()
+        return {
+            "Frequency": f,
+            "Left": left,
+            "Right": right,
+        }

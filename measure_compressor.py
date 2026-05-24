@@ -59,10 +59,10 @@ def measure_compressor_attack_release(is_release, label, voltage_start_dBV=-40, 
     Vi = generate_waveform()
 
     inst.acquire_custom_waveform(np.real(Vi))
-    Vo_i = np.array(inst.measure_recorded_waveform())
+    Vo_i = np.array(inst.measure_recorded_waveform()["Left"])
     time.sleep(3)
     inst.acquire_custom_waveform(np.imag(Vi))
-    Vo_q = np.array(inst.measure_recorded_waveform())
+    Vo_q = np.array(inst.measure_recorded_waveform()["Left"])
     Vo = Vo_i + 1j*Vo_q
 
     data = {
