@@ -11,6 +11,9 @@ def expochirp(f1, f2, N, fs):
         (np.exp(t / T * np.log(w2 / w1)) - 1)
     )
 
+    # t = np.arange(N) / fs
+    # return scipy.signal.chirp(t, f1, t[-1], f2, "logarithmic", complex=False)
+
 def log2(x):
     return np.log(x) / np.log(2)
 
