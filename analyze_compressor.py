@@ -195,7 +195,8 @@ def _analyze_compressor_attack_release(is_release, super_label, datasets, use_hi
     ax.legend(loc="lower right" if is_release else "upper right", ncols=1, fontsize=6)
     ax.set_xlabel("Time [ms]")
     ax.set_ylabel("Output amplitude [dBV]")
-    ax.set_ylim(ymin - 3, ymax + 3)
+    if ymin is not None and ymax is not None:
+        ax.set_ylim(ymin - 3, ymax + 3)
     fig.tight_layout()
     fig.savefig(qa.generate_filename(super_label, measurement_label, "png"))
 

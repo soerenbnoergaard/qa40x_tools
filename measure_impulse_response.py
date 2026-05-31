@@ -2,16 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy.signal
 import qa40x as qa
-
-def expochirp(f1, f2, N, fs):
-    T = N / fs
-    t = np.arange(N) / fs
-    w1 = 2 * np.pi * f1
-    w2 = 2 * np.pi * f2
-    return np.sin(
-        (w1 * T) / (np.log(w2 / w1)) *
-        (np.exp(t / T * np.log(w2 / w1)) - 1)
-    )
+import algorithm
 
 def measure(label="", amplitude_dBV=-20, num_points=256 * 1024):
     inst = qa.Qa40x()
@@ -33,7 +24,7 @@ def measure(label="", amplitude_dBV=-20, num_points=256 * 1024):
     N = n_stop - n_start
     A = 10**(amplitude_dBV / 20)
     # R = ramp(10000, 0, N)
-    x[n_start:n_stop] = A * expochirp(f1, f2, N, fs)
+    x[n_start:n_stop] = A * algorithm.expochirp(f1, f2, N, fs)
     t = np.arange(num_points) / fs
 
     inst.set_buffer_size(N)
@@ -78,41 +69,14 @@ def analyze(data):
     ax.plot(t, x)
     ax.plot(t, y)
 
-    # Construct the "inverse filter" from the input and apply amplitude modulation to invert the pink noise slope
-    # Amplitude modulation: Starts at 0 dB, ends at -6 * log2(w2 / w1).
-    #
-    # - farina2000simultaneous_measurement_of_impulse_response_and_distortion_with_a_swept-sine_technique
-    # - holters2009impulse_response_measurement_techniques_and_their_applicability_in_the_real_world
+    # Extract chirp only
+    x = x[n_start:n_stop]
+    y = y[n_start:n_stop]
 
-    log2 = lambda _x: np.log(_x) / np.log(2)
-    L = n_stop - n_start
-    a_start_dB = 0
-    a_stop_dB = a_start_dB - 6 * log2(f_stop / f_start)
-    a_mod = 10**(np.linspace(a_start_dB, a_stop_dB, L) / 20)
-
-    x_inv_section = a_mod * np.flipud(x[n_start:n_stop])
-    x_inv = np.zeros(N)
-    x_inv[N - n_stop - 1:N - n_start - 1] = x_inv_section
-
-    ax = axs[1]
-    ax.plot(x)
-    ax.plot(x_inv)
-
-    # Do deconvolution to obtain impulse response
-    h_est = scipy.signal.convolve(y, x_inv, "full")
-    n_est_mid = len(h_est) // 2
-    n_est = (np.arange(len(h_est)) - n_est_mid)
-    n_est_low = n_est_mid - 1000
-    n_est_high = n_est_mid + 10000
+    h_est = algorithm.deconvolve(x, y, f_start, f_stop)
 
     ax = axs[2]
-    ax.plot(n_est, h_est)
-    ax.axvline(n_est_low - n_est_mid)
-    ax.axvline(n_est_high - n_est_mid)
-    ax.set_xlim(n_est_low - n_est_mid - 100, n_est_high - n_est_mid + 100)
-
-    # Extract
-    h_est = h_est[n_est_low : n_est_high]
+    ax.plot(h_est)
 
     # Calculate frequency response
     H_est = np.abs(np.fft.fft(h_est))
@@ -130,8 +94,8 @@ def analyze(data):
 
 
 if __name__ == "__main__":
-    data = measure()
-    analyze(data)
+    # data = measure()
+    # analyze(data)
 
-    # analyze(qa.load_data("_impulse_response_2026-05-25_140658.json.gz"))
+    analyze(qa.load_data("_impulse_response_2026-05-25_141319.json.gz"))
     plt.show()

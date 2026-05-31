@@ -84,29 +84,29 @@ def measure_compressor_release(*args, **kwargs):
 
 
 if __name__ == "__main__":
-    LABEL = "eureka_line_T-32_A00_RA00_RE10_G0_SOFToff"
-    THRESHOLD_dBV = -40
+    LABEL = "bbe_opto_stomp_V10_P00_C08"
+    THRESHOLD_dBV = -20
 
 
     # CURVE
     # Recommended settings: attack=fast, release=fast
 
-    # data = measure_compressor_curve(LABEL, THRESHOLD_dBV - 10, THRESHOLD_dBV + 10, 1)
+    # data = measure_compressor_curve(LABEL, THRESHOLD_dBV - 20, THRESHOLD_dBV + 10, 1)
     # analyze.analyze_compressor_curve(LABEL, [data])
 
 
     # ATTACK
     # Recommended settings: ratio=high, release=fast, Vstart=Vthres-20, Vstop=Vthres+20
 
-    # data = measure_compressor_attack(LABEL, THRESHOLD_dBV - 20, THRESHOLD_dBV + 20)
+    # data = measure_compressor_attack(LABEL, THRESHOLD_dBV - 20, THRESHOLD_dBV + 10)
     # analyze.analyze_compressor_attack(LABEL, [data])
 
 
     # RELEASE
     # Recommended settings: ratio=high, attack=fast, Vstart=Vthres+20, Vstop=Vthres-20
 
-    data = measure_compressor_release(LABEL, THRESHOLD_dBV + 20, THRESHOLD_dBV - 20)
-    analyze.analyze_compressor_release(LABEL, [data])
+    # data = measure_compressor_release(LABEL, THRESHOLD_dBV + 10, THRESHOLD_dBV - 20)
+    # analyze.analyze_compressor_release(LABEL, [data])
 
 
     plt.show()
