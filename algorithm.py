@@ -32,10 +32,17 @@ def inverse_filter(x, f_start, f_stop):
     x_inv = a_mod * np.flipud(x)
     return x_inv
 
-def deconvolve(x, y, f_start, f_stop):
-    """x=chirp source, y=chirp response"""
+def deconvolve(x, y, n_start, n_stop, f_start, f_stop):
+    """
+    x: chirp source
+    y: chirp response 
+    n_start: chirp start index
+    n_stop: chirp stop index
+    f_start: chirp start frequency
+    f_stop: chirp stop frequency
+    """
 
-    x_inv = inverse_filter(x, f_start, f_stop)
+    x_inv = inverse_filter(x[n_start:n_stop], f_start, f_stop)
     h_est = scipy.signal.convolve(y, x_inv, "full")
 
     return h_est

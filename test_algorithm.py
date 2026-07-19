@@ -41,17 +41,17 @@ def test_decolvolve_fir_filter():
     y = scipy.signal.convolve(x, h, "full")
 
     # Deconvolve to estimate h, extract filter taps, and normlize
-    h_est = algorithm.deconvolve(x, y, f_start, f_stop)
+    h_est = algorithm.deconvolve(x, y, 0, N, f_start, f_stop)
     n_mid = len(h_est) // 2
     h_est = h_est[n_mid - Nc//2 : n_mid + Nc//2]
     h_est /= np.sum(h_est)
-
-    np.testing.assert_allclose(h, h_est, atol=0.001)
 
     # fig, ax = plt.subplots()
     # ax.plot(h, linewidth=5, color="blue")
     # ax.plot(h_est, linewidth=2, color="orange")
     # plt.show()
+
+    np.testing.assert_allclose(h, h_est, atol=0.001)
 
 def test_decolvolve_distorted_fir_filter():
     fs = 48000
@@ -71,7 +71,7 @@ def test_decolvolve_distorted_fir_filter():
     y = scipy.signal.convolve(x_dist, h, "full")
 
     # Apply deconvolution
-    h_est = algorithm.deconvolve(x, y, f_start, f_stop)
+    h_est = algorithm.deconvolve(x, y, 0, N, f_start, f_stop)
 
     # Extract fundamental and harmonics
     # chan2010swept_sine_chirps_for_measuring_impulse_response
